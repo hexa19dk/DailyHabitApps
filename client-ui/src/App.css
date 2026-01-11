@@ -1,0 +1,24 @@
+.css-lpesjx-MuiPaper-root-MuiDrawer-paper{
+    top: 65px !important;
+}
+.MuiPaper-root.MuiPaper-elevation.MuiPaper-elevation0.MuiDrawer-paper.MuiDrawer-paperAnchorLeft.MuiDrawer-paperAnchorDockedLeft.css-1bdav0j{
+    top: 65px !important;
+}
+
+.MuiOutlinedInput-notchedOutline {
+    border-color: #efefef !important;
+}
+
+.MuiTypography-root,
+.MuiListSubheader-root,
+.MuiChip-label {
+    font-family: 'Plus Jakarta Sans', sans-serif !important;
+}
+
+/* Remove black border outline from MUI Tabs/Tab on focus/click */
+.MuiTabs-root .MuiTab-root:focus,
+.MuiTabs-root .MuiTab-root:focus-visible,
+.MuiTabs-root .MuiTab-root.Mui-focusVisible {
+    outline: none !important;
+    box-shadow: none !important;
+}

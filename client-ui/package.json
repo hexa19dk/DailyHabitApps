@@ -1,0 +1,49 @@
+{
+  "name": "client-ui",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "lint": "eslint .",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@emotion/react": "^11.14.0",
+    "@emotion/styled": "^11.14.0",
+    "@iconify/react": "^6.0.0",
+    "@mui/icons-material": "^7.1.0",
+    "@mui/lab": "^7.0.0-beta.12",
+    "@mui/material": "^7.1.0",
+    "@mui/system": "^7.1.0",
+    "@mui/x-date-pickers": "^8.8.0",
+    "@svgr/rollup": "^8.1.0",
+    "@tabler/icons-react": "^3.33.0",
+    "apexcharts": "^4.7.0",
+    "axios": "^1.11.0",
+    "dayjs": "^1.11.13",
+    "jwt-decode": "^4.0.0",
+    "lodash": "^4.17.21",
+    "prop-types": "^15.8.1",
+    "react": "^19.0.0",
+    "react-apexcharts": "^1.7.0",
+    "react-color": "^2.19.3",
+    "react-dom": "^19.0.0",
+    "react-helmet": "^6.1.0",
+    "react-mui-sidebar": "^1.2.7",
+    "react-router": "^7.0.2",
+    "simplebar-react": "^3.3.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.25.0",
+    "@types/react": "^19.1.2",
+    "@types/react-dom": "^19.1.2",
+    "@vitejs/plugin-react": "^4.4.1",
+    "eslint": "^9.25.0",
+    "eslint-plugin-react-hooks": "^5.2.0",
+    "eslint-plugin-react-refresh": "^0.4.19",
+    "globals": "^16.0.0",
+    "vite": "^6.3.5"
+  }
+}
