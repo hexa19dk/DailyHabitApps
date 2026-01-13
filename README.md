@@ -3,6 +3,72 @@
 A full-stack habit tracking application that helps users build consistency through daily habit tracking, calendar-based logging, and visual analytics.
 Built with React (Material UI) on the frontend and ASP.NET Core Web API (.NET 8) on the backend.
 
+## 🖥️ Tech Stack
+### 🖼️ Frontend (Client UI)
+| Category           | Technology                |
+| ------------------ | ------------------------- |
+| Language           | TypeScript / JavaScript   |
+| Framework          | React                     |
+| UI Library         | Material UI (MUI)         |
+| Charting           | ApexCharts                |
+| Routing            | React Router              |
+| State Management   | React Hooks               |
+| Styling            | CSS, MUI Theme            |
+| Environment Config | `.env`, `.env.production` |
+| Build Tool         | Vite / CRA                |
+
+### 🧠 Backend (Server API)
+| Category         | Technology                 |
+| ---------------- | -------------------------- |
+| Language         | C#                         |
+| Framework        | ASP.NET Core Web API       |
+| Runtime          | .NET 8                     |
+| Architecture     | Controller–Service–UseCase |
+| API Style        | REST                       |
+| Validation       | Custom Validators          |
+| Mapping          | DTO ↔ Domain Mappers       |
+| Configuration    | `appsettings.json`         |
+| Containerization | Docker                     |
+| CI/CD            | Jenkins                    |
+
+### 🖥 Client (Frontend)
+	client-ui/
+	├── public/
+	├── src/
+	│   ├── assets/           # Images, icons, static assets
+	│   ├── components/       # Reusable UI components
+	│   ├── layouts/          # App layout wrappers
+	│   ├── routes/           # Public & protected routes
+	│   ├── services/         # API service calls
+	│   ├── utils/            # Helper functions
+	│   ├── views/
+	│   │   ├── dashboard/    # Dashboard pages & widgets
+	│   │   ├── habit/        # Habit management & tracking
+	│   │   ├── stats/        # Statistics & analytics
+	│   │   └── settings/     # User & app settings
+	│   ├── App.tsx
+	│   └── main.tsx
+	├── .env
+	├── .env.production
+	└── package.json
+	
+### 🧠 Server (Backend)
+	Talenta-Receiver-API-Gateway/
+	├── Config/              # Application configuration setup
+	├── Mappers/             # DTO ↔ Domain model mappings
+	├── Models/              # Domain / data models
+	├── Repositories/        # Data access layer
+	├── Services/            # Business logic services
+	├── UseCases/            # Application use-case orchestrators
+	├── Validators/          # Input & request validation
+	├── Utils/               # Helpers & shared utilities
+	├── Protos/              # Protobufs (gRPC / integration events)
+	├── Dockerfile           # Container build definition
+	├── Jenkinsfile          # CI/CD pipeline configuration
+	├── Program.cs           # Application entry point
+	└── Startup.cs           # Middleware, DI, routing
+
+
 ## ✨ Key Features
 ### 🔐 Authentication & Access Control
   - User registration and login
