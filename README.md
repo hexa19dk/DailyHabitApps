@@ -52,21 +52,58 @@ Built with React (Material UI) on the frontend and ASP.NET Core Web API (.NET 8)
 	├── .env.production
 	└── package.json
 	
-### 🧠 Server (Backend)
-	Talenta-Receiver-API-Gateway/
-	├── Config/              # Application configuration setup
-	├── Mappers/             # DTO ↔ Domain model mappings
-	├── Models/              # Domain / data models
-	├── Repositories/        # Data access layer
-	├── Services/            # Business logic services
-	├── UseCases/            # Application use-case orchestrators
-	├── Validators/          # Input & request validation
-	├── Utils/               # Helpers & shared utilities
-	├── Protos/              # Protobufs (gRPC / integration events)
-	├── Dockerfile           # Container build definition
-	├── Jenkinsfile          # CI/CD pipeline configuration
-	├── Program.cs           # Application entry point
-	└── Startup.cs           # Middleware, DI, routing
+🧠 Backend (Daily Habit Tracker API)
+	server/
+	├── Controllers/              # HTTP API controllers
+	│   ├── AuthController.cs     # Authentication endpoints
+	│   ├── HabitController.cs    # Habit CRUD & tracking endpoints
+	│   └── StatsController.cs    # Statistics & analytics endpoints
+	│
+	├── DTOs/                     # Request / response data contracts
+	│   ├── Auth/
+	│   ├── Habit/
+	│   └── Stats/
+	│
+	├── Models/                   # Domain & data models
+	│   ├── User.cs
+	│   ├── Habit.cs
+	│   ├── HabitLog.cs
+	│   └── HabitSchedule.cs
+	│
+	├── Services/                 # Business logic layer
+	│   ├── AuthService.cs
+	│   ├── HabitService.cs
+	│   └── StatsService.cs
+	│
+	├── Repositories/             # Data access layer
+	│   ├── Interfaces/
+	│   └── Implementations/
+	│
+	├── Validators/               # Input & request validation
+	│   ├── HabitValidator.cs
+	│   └── AuthValidator.cs
+	│
+	├── Mappers/                  # DTO ↔ Domain model mapping
+	│   └── HabitMapper.cs
+	│
+	├── Utils/                    # Helper & utility classes
+	│   ├── DateTimeHelper.cs
+	│   └── ResponseHelper.cs
+	│
+	├── Data/                     # Database context & migrations
+	│   ├── ApplicationDbContext.cs
+	│   └── Migrations/
+	│
+	├── Config/                   # Application & environment configuration
+	│   ├── JwtOptions.cs
+	│   └── AppSettings.cs
+	│
+	├── Program.cs                # Application entry point
+	├── Startup.cs                # Middleware, DI, routing
+	├── appsettings.json          # Base configuration
+	├── appsettings.Development.json
+	├── Dockerfile                # Container build definition
+	└── README.md
 
 
 ## ✨ Key Features
