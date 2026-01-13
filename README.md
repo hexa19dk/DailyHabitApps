@@ -52,7 +52,7 @@ Built with React (Material UI) on the frontend and ASP.NET Core Web API (.NET 8)
 	├── .env.production
 	└── package.json
 	
-🧠 Backend (Daily Habit Tracker API)
+### 🧠 Backend (Daily Habit Tracker API)
 	server/
 	├── Controllers/              # HTTP API controllers
 	│   ├── AuthController.cs     # Authentication endpoints
