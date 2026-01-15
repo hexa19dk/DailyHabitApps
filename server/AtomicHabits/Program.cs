@@ -44,48 +44,77 @@ builder.Services.AddScoped<IDashboardService, DashboardService>();
 
 #endregion
 
-builder.Services.AddScoped<IJwtKeyProvider, JwtKeyProvider>();
-
 #endregion
 
 
 // ===== JWT Authentication and Authorization =====
-var jwtKey = builder.Configuration["Jwt:Key"] ?? throw new Exception("Missing JWT key");
-var jwtIssuer = builder.Configuration["Jwt:Issuer"] ?? "AtomicHabit";
-var jwtAudience = builder.Configuration["Jwt:Audience"] ?? "Piccolo";
+//string GetEnv(string key)
+//{
+//    return Environment.GetEnvironmentVariable(key)
+//        ?? throw new InvalidOperationException($"{key} is not configured");
+//}
 
-builder.Services.AddAuthentication(options => {
-    options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
-    options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
-})
-.AddJwtBearer(options =>
+#region ===== JWT Configuration =====
+
+string? GetEnvOptional(string key)
 {
-    var sp = builder.Services.BuildServiceProvider();
-    var provider = sp.GetRequiredService<IJwtKeyProvider>();
-    var key = provider.GetKeyAsync().Result; // preload key
+    return Environment.GetEnvironmentVariable(key);
+}
 
-    options.TokenValidationParameters = new TokenValidationParameters
+var jwtKey = GetEnvOptional("JWT_SECRET");
+var jwtIssuer = GetEnvOptional("JWT_ISSUER");
+var jwtAudience = GetEnvOptional("JWT_AUDIENCE");
+
+bool isDesignTime = builder.Environment.IsDevelopment() == false && AppDomain.CurrentDomain.FriendlyName.Contains("ef", StringComparison.OrdinalIgnoreCase);
+
+if (!isDesignTime)
+{
+    if (string.IsNullOrEmpty(jwtKey) ||
+        string.IsNullOrEmpty(jwtIssuer) ||
+        string.IsNullOrEmpty(jwtAudience))
     {
-        ValidateIssuer = true,
-        ValidateAudience = true,
-        ValidateLifetime = true,
-        ValidateIssuerSigningKey = true,
-        ValidIssuer = jwtIssuer,
-        ValidAudience = jwtAudience,
-        IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey)),
-        ClockSkew = TimeSpan.Zero,
-        NameClaimType = "username",
-        RoleClaimType = "role"
-    };
-});
+        throw new Exception("JWT environment variables are not configured");
+    }
+}
 
-builder.Services.AddAuthorization(options =>
+if (!isDesignTime && !string.IsNullOrEmpty(jwtKey))
 {
-    options.FallbackPolicy = new AuthorizationPolicyBuilder()
-        .AddAuthenticationSchemes(JwtBearerDefaults.AuthenticationScheme)
-        .RequireAuthenticatedUser()
-        .Build();
-});
+    builder.Services
+    .AddAuthentication(options =>
+    {
+        options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
+        options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
+    })
+    .AddJwtBearer(options =>
+    {
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuer = true,
+            ValidateAudience = true,
+            ValidateLifetime = true,
+            ValidateIssuerSigningKey = true,
+            ValidIssuer = jwtIssuer,
+            ValidAudience = jwtAudience,
+            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey)),
+            ClockSkew = TimeSpan.Zero,
+            NameClaimType = "username",
+            RoleClaimType = "role"
+        };
+    });
+
+    builder.Services.AddAuthorization(options =>
+    {
+        options.FallbackPolicy = new AuthorizationPolicyBuilder()
+            .AddAuthenticationSchemes(JwtBearerDefaults.AuthenticationScheme)
+            .RequireAuthenticatedUser()
+            .Build();
+    });
+}
+
+#endregion
+
+
+#region ===== Swagger Configuration =====
 
 builder.Services.AddSwaggerGen(options =>
 {
@@ -116,7 +145,7 @@ builder.Services.AddSwaggerGen(options =>
     });
 });
 
-builder.Services.AddScoped<JwtKeySeeder>();
+#endregion
 
 builder.Services.AddCors(options =>
 {
@@ -136,6 +165,18 @@ builder.Services.AddCors(options =>
 
 var app = builder.Build();
 
+
+// ======= Runtime Validation of JWT Configuration =======
+if (!isDesignTime && app.Environment.IsProduction())
+{
+    if (string.IsNullOrEmpty(jwtKey) ||
+        string.IsNullOrEmpty(jwtIssuer) ||
+        string.IsNullOrEmpty(jwtAudience))
+    {
+        throw new Exception("JWT environment variables are not configured");
+    }
+}
+
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
 {
@@ -143,11 +184,10 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
-using (var scope = app.Services.CreateScope())
-{
-    var seeder = scope.ServiceProvider.GetRequiredService<JwtKeySeeder>();
-    await seeder.SeedInitialJwtKeyAsync();
 
+if (!isDesignTime)
+{
+    var scope = app.Services.CreateScope();
     var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
     await DbSeeder.SeedRolesAsync(dbContext);
 }

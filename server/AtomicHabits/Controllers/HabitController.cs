@@ -2,10 +2,7 @@
 using AtomicHabits.Models.DTO;
 using AtomicHabits.Services;
 using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
-using System.Net;
 
 namespace AtomicHabits.Controllers
 {
@@ -30,7 +27,10 @@ namespace AtomicHabits.Controllers
         [HttpGet("get-habits/{userId}")]
         public async Task<IActionResult> GetHabits(int userId, CancellationToken ct)
         {
-            var res = await _habitService.GetHabits(userId, ct);
+            var rawAuth = Request.Headers["Authorization"].ToString();
+            var token = rawAuth?.Replace("Bearer ", "");
+
+            var res = await _habitService.GetHabits(userId, token, ct);
             return StatusCode((int)res.StatusCode, res);
         }
 

@@ -2,16 +2,14 @@
 using AtomicHabits.Models.DTO;
 using AtomicHabits.Repositories;
 using Azure;
-using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
-using Microsoft.IdentityModel.Protocols.OpenIdConnect;
+using Paket;
 using System.Net;
 
 namespace AtomicHabits.Services
 {
     public interface IHabitService
     {
-        Task<ApiResponse> GetHabits(int userId, CancellationToken cancellationToken);
+        Task<ApiResponse> GetHabits(int userId, string token, CancellationToken cancellationToken);
         Task<ApiResponse> PostHabit(HabitDTO habitDto);
         Task<ApiResponse> UpdateHabit(int habitId, HabitDTO habitDto);
         Task<ApiResponse> DeleteHabit(int habitId);
@@ -23,17 +21,30 @@ namespace AtomicHabits.Services
         private readonly IHabitRepositories _repo;
         private readonly AppDbContext _db;
         private ApiResponse _response;
-        public HabitService(IHabitRepositories repo, AppDbContext db) 
+        private readonly ILogger<HabitService> _log;
+        private readonly IAuthService _authService;
+        public HabitService(IHabitRepositories repo, AppDbContext db, ILogger<HabitService> log, IAuthService authService) 
         { 
             _repo = repo;
             _db = db;
             _response = new ApiResponse();
+            _log = log;
+            _authService = authService;
         }
 
-        public async Task<ApiResponse> GetHabits(int userId, CancellationToken ct)
+        public async Task<ApiResponse> GetHabits(int userId, string token, CancellationToken ct)
         {
             try
             {
+                var user = await _authService.GetCurrentUserFromJwt(token);
+                if (user == null)
+                {
+                    _response.IsSuccess = false;
+                    _response.StatusCode = HttpStatusCode.Unauthorized;
+                    _response.ErrorMessages = new List<string> { $"user is unahtorized " };
+                    return _response;
+                }
+
                 var habits = await _repo.GetHabitByUserId(userId);
 
                 if (habits == null || !habits.Any())
@@ -51,9 +62,10 @@ namespace AtomicHabits.Services
             }
             catch (Exception ex)
             {
+                _log.LogError(ex, $"GetHabits failed for userId {userId}", userId);
                 _response.IsSuccess = false;
                 _response.StatusCode = HttpStatusCode.InternalServerError;
-                _response.ErrorMessages = new List<string> { "Get habits error, message: " + ex.Message };
+                _response.ErrorMessages = new List<string> { "GetAn unexpected error occurred while retrieving habits. " + ex.Message };
                 return _response;
             }
         }
@@ -79,6 +91,7 @@ namespace AtomicHabits.Services
             }
             catch (Exception ex)
             {
+                _log.LogError(ex, $"Post habit failed, payload: {habitDto}");
                 _response.IsSuccess = false;
                 _response.StatusCode = HttpStatusCode.InternalServerError;
                 _response.ErrorMessages = new List<string> { "Post habit error, message: " + ex.Message };
@@ -108,6 +121,7 @@ namespace AtomicHabits.Services
             }
             catch (Exception ex)
             {
+                _log.LogError(ex, $"Update habit failed, payload: {habitDto}");
                 _response.IsSuccess = false;
                 _response.StatusCode = HttpStatusCode.InternalServerError;
                 _response.ErrorMessages = new List<string> { "Update habit error, message: " + ex.Message };
@@ -128,6 +142,7 @@ namespace AtomicHabits.Services
             }
             catch (Exception ex)
             {
+                _log.LogError(ex, $"Delete habit failed, habit id: {habitId}");
                 _response.IsSuccess = false;
                 _response.StatusCode = HttpStatusCode.InternalServerError;
                 _response.ErrorMessages = new List<string> { "Delete habit error, message: " + ex.Message };
@@ -195,6 +210,7 @@ namespace AtomicHabits.Services
             }
             catch (Exception ex)
             {
+                _log.LogError(ex, $"Get habit summary failed, message: " + ex.Message);
                 _response.IsSuccess = false;
                 _response.StatusCode = HttpStatusCode.InternalServerError;
                 _response.ErrorMessages = new List<string>

@@ -52,11 +52,30 @@ namespace AtomicHabits.Controllers
         }
 
         [HttpPost("refresh-token")]
-        [AllowAnonymous]
+        //[AllowAnonymous]
         public async Task<IActionResult> RefreshToken([FromBody] RefreshTokenDto dto, CancellationToken cancellationToken)
         {
             var res = await _authService.RefreshTokenAsync(dto, cancellationToken);
             return StatusCode((int)res.StatusCode, res);
+        }
+
+        [Authorize]
+        [HttpPost("revoke-refresh-token")]
+        public async Task<IActionResult> RevokeRefreshToken(CancellationToken ct)
+        {
+            var userIdClaim = User.FindFirstValue("userId");
+            if (!int.TryParse(userIdClaim, out var userId))
+                return Unauthorized("Invalid user id");
+
+            return Ok(await _authService.RevokeRefreshTokenAsync(userId, ct));
+        }
+
+        [Authorize]
+        [HttpPost("logout")]
+        public async Task<IActionResult> Logout(CancellationToken ct)
+        {
+            var userId = int.Parse(User.FindFirstValue("userId")!);
+            return Ok(await _authService.RevokeRefreshTokenAsync(userId, ct));
         }
 
     }

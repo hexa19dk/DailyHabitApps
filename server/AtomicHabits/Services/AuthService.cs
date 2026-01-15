@@ -2,12 +2,12 @@
 using AtomicHabits.Models.DTO;
 using AtomicHabits.Repositories;
 using AtomicHabits.Service;
-using Azure;
+using Microsoft.AspNetCore.Http.HttpResults;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Identity.UI.Services;
 using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.EntityFrameworkCore;
 using System.Net;
-using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Encodings.Web;
@@ -18,18 +18,18 @@ namespace AtomicHabits.Services
     {
         Task<ApiResponse> RegisterAsync(RegisterDto dto, CancellationToken cancellationToken = default);
         Task<ApiResponse> LoginAsync(LoginDto dto, CancellationToken cancellationToken = default);
-        Task<ApiResponse> RefreshTokenAsync(RefreshTokenDto dto, CancellationToken cancellationToken = default);
         Task<ApiResponse> ForgotPasswordAsync(ForgotPasswordDTO dto, CancellationToken cancellationToken = default);
         Task<ApiResponse> ResetPasswordAsync(ResetPasswordDTO dto, CancellationToken cancellationToken = default);
-        Task<ApiResponse> StoreRefreshTokenAsync(int userId, string refreshToken, CancellationToken cancellationToken = default);
+        Task<ApiResponse> RefreshTokenAsync(RefreshTokenDto dto, CancellationToken ct);
+        //Task<ApiResponse> StoreRefreshTokenAsync(int userId, string refreshToken, CancellationToken cancellationToken = default);
         Task<string?> GeneratePasswordResetTokenAsync(string email, CancellationToken cancellationToken = default);
-
 
         Task<UserInfoDto?> GetCurrentUserFromJwt(string? jwtToken);
         Task<string?> GetUserIdFromJwt(string? jwtToken);
-
         Task<string?> GetUserIdAsync(HttpContext httpContext);
         Task<UserInfoDto?> GetCurrentUserAsync(HttpContext httpContext);
+        Task<ApiResponse> RevokeRefreshTokenAsync(int userId, CancellationToken ct);
+
     }
 
     public class AuthService : IAuthService
@@ -40,8 +40,9 @@ namespace AtomicHabits.Services
         private readonly IEmailSender _emailSender;
         private readonly ILogger<AuthService> _logger;
         private ApiResponse _response;
+        private readonly IPasswordHasher<User> _hasher;
 
-        public AuthService(AppDbContext db, ITokenService tokenService, IUserRepositories userRepo, IEmailSender emailSender, ILogger<AuthService> logger)
+        public AuthService(AppDbContext db, ITokenService tokenService, IUserRepositories userRepo, IEmailSender emailSender, ILogger<AuthService> logger, IPasswordHasher<User> hasher)
         {
             _db = db;
             _tokenService = tokenService;
@@ -49,77 +50,56 @@ namespace AtomicHabits.Services
             _emailSender = emailSender;
             _logger = logger;
             _response = new ApiResponse();
+            _hasher = hasher;
         }
 
-        public async Task<ApiResponse> RegisterAsync(RegisterDto dto, CancellationToken cancellationToken = default)
+        public async Task<ApiResponse> RegisterAsync(RegisterDto dto, CancellationToken ct)
         {
-            var response = new ApiResponse();
-            using var trx = await _db.Database.BeginTransactionAsync(cancellationToken);
+            using var trx = await _db.Database.BeginTransactionAsync(ct);
             try
             {
-                if (await _db.Users.AnyAsync(x => x.Username == dto.Username || x.Email == dto.Email, cancellationToken))
+                if (await _db.Users.AnyAsync(x => x.Username == dto.Username || x.Email == dto.Email, ct))
                 {
-                    response.StatusCode = HttpStatusCode.BadRequest;
-                    response.IsSuccess = false;
-                    response.ErrorMessages.Add("Username or Email already exists");
-                    return response;
+                    _response.StatusCode = HttpStatusCode.BadRequest;
+                    _response.IsSuccess = false;
+                    _response.ErrorMessages.Add("Username or Email already exists");
+                    return _response;
                 }
 
                 var user = new User
                 {
                     Username = dto.Username,
                     Email = dto.Email,
-                    PasswordHash = BCrypt.Net.BCrypt.HashPassword(dto.Password),
+                    PasswordHash = _hasher.HashPassword(null!, dto.Password),
                     CreatedAt = DateTime.UtcNow,
                     IsActive = true
                 };
 
-                await _db.Users.AddAsync(user, cancellationToken);
-                await _db.SaveChangesAsync(cancellationToken);
+                await _db.Users.AddAsync(user, ct);
+                await _db.SaveChangesAsync(ct);
 
                 // assign role if exists
-                var role = await _db.Roles.FirstOrDefaultAsync(r => r.Name == dto.Role, cancellationToken);
+                var role = await _db.Roles.FirstOrDefaultAsync(r => r.Name == dto.Role, ct);
                 if (role != null)
                 {
-                    await _db.UserRoles.AddAsync(new UserRole { UserId = user.Id, RoleId = role.Id }, cancellationToken);
-                    await _db.SaveChangesAsync(cancellationToken);
+                    await _db.UserRoles.AddAsync(new UserRole { UserId = user.Id, RoleId = role.Id }, ct);
+                    await _db.SaveChangesAsync(ct);
                 }
 
-                // generate tokens
-                var roles = await _db.UserRoles
-                    .Where(ur => ur.UserId == user.Id)
-                    .Include(ur => ur.Role)
-                    .Select(ur => ur.Role.Name)
-                    .ToListAsync(cancellationToken);
-
-                var accessToken = await _tokenService.GenerateToken(user, roles);
-                var refreshToken = await _tokenService.GenerateRefreshToken(user);
-                await StoreRefreshTokenAsync(user.Id, refreshToken, cancellationToken);
-
-                await trx.CommitAsync(cancellationToken);
-
-                response.StatusCode = HttpStatusCode.OK;
-                response.IsSuccess = true;
-                response.Result = new
-                {
-                    token = accessToken,
-                    refreshToken = refreshToken,
-                    itemuser = new { Username = dto.Username, Email = dto.Email }
-                };
-                return response;
+                return await IssueTokensAsync(user, ct);
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "[AuthService.RegisterAsync] Error for {Username}", dto?.Username);
-                await trx.RollbackAsync(cancellationToken);
-                response.IsSuccess = false;
-                response.StatusCode = HttpStatusCode.InternalServerError;
-                response.ErrorMessages.Add(ex.Message);
-                return response;
+                await trx.RollbackAsync(ct);
+                _response.IsSuccess = false;
+                _response.StatusCode = HttpStatusCode.InternalServerError;
+                _response.ErrorMessages.Add(ex.Message);
+                return _response;
             }
         }
 
-        public async Task<ApiResponse> LoginAsync(LoginDto dto, CancellationToken cancellationToken = default)
+        public async Task<ApiResponse> LoginAsync(LoginDto dto, CancellationToken ct)
         {
             var response = new ApiResponse();
             try
@@ -127,40 +107,27 @@ namespace AtomicHabits.Services
                 var user = await _db.Users
                     .Include(u => u.UserRoles)!
                     .ThenInclude(ur => ur.Role)
-                    .FirstOrDefaultAsync(u => u.Username == dto.Username || u.Email == dto.Username, cancellationToken);
+                    .FirstOrDefaultAsync(u => u.Username == dto.Username || u.Email == dto.Username, ct);
 
-                if (user == null || !BCrypt.Net.BCrypt.Verify(dto.Password, user.PasswordHash))
+                var verify = _hasher.VerifyHashedPassword(user!, user?.PasswordHash!, dto.Password);
+
+                if (user == null || verify == PasswordVerificationResult.Failed)
                 {
-                    response.StatusCode = HttpStatusCode.Unauthorized;
-                    response.IsSuccess = false;
-                    response.ErrorMessages.Add("Invalid Credentials");
+                    _response.StatusCode = HttpStatusCode.Unauthorized;
+                    _response.IsSuccess = false;
+                    _response.ErrorMessages.Add("Invalid Credentials");
                     return response;
                 }
 
-                var roles = user.UserRoles!.Select(u => u.Role.Name).ToList();
-                var accessToken = await _tokenService.GenerateToken(user, roles);
-                var refreshToken = await _tokenService.GenerateRefreshToken(user);
-
-                await StoreRefreshTokenAsync(user.Id, refreshToken, cancellationToken);
-
-                response.StatusCode = HttpStatusCode.OK;
-                response.IsSuccess = true;
-                response.Result = new
-                {
-                    accessToken,
-                    refreshToken,
-                    expiresAt = DateTime.UtcNow.AddMinutes(15)
-                };
-
-                return response;
+                return await IssueTokensAsync(user, ct);
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "[AuthService.LoginAsync] Error login attempt for {Username}", dto?.Username);
-                response.IsSuccess = false;
-                response.StatusCode = HttpStatusCode.InternalServerError;
-                response.ErrorMessages.Add(ex.Message);
-                return response;
+                _response.IsSuccess = false;
+                _response.StatusCode = HttpStatusCode.InternalServerError;
+                _response.ErrorMessages.Add(ex.Message);
+                return _response;
             }
         }
 
@@ -176,17 +143,15 @@ namespace AtomicHabits.Services
 
         public async Task<ApiResponse> ForgotPasswordAsync(ForgotPasswordDTO dto, CancellationToken cancellationToken)
         {
-            var response = new ApiResponse();
-
             try
             {
                 var user = await _userRepo.GetByEmailAsync(dto.Email);
                 if (user == null)
                 {
-                    response.StatusCode = HttpStatusCode.BadRequest;
-                    response.IsSuccess = false;
-                    response.ErrorMessages.Add("User not found.");
-                    return response;
+                    _response.StatusCode = HttpStatusCode.BadRequest;
+                    _response.IsSuccess = false;
+                    _response.ErrorMessages.Add("User not found.");
+                    return _response;
                 }
 
                 var token = await GeneratePasswordResetTokenAsync(dto.Email);
@@ -195,209 +160,324 @@ namespace AtomicHabits.Services
 
                 await _emailSender.SendEmailAsync(dto.Email, "Reset Password", MailBody(dto.Email, HtmlEncoder.Default.Encode(resetPath)));
 
-                response.IsSuccess = true;
-                response.StatusCode = HttpStatusCode.OK;
-                response.Result = new ForgotPasswordDTO();
-                return response;
+                _response.IsSuccess = true;
+                _response.StatusCode = HttpStatusCode.OK;
+                _response.Result = new ForgotPasswordDTO();
+                return _response;
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "[AuthService.ForgotPasswordAsync] Error for {Email}", dto.Email);
-                response.IsSuccess = false;
-                response.StatusCode = HttpStatusCode.InternalServerError;
-                response.ErrorMessages.Add(ex.Message);
-                return response;
+                _response.IsSuccess = false;
+                _response.StatusCode = HttpStatusCode.InternalServerError;
+                _response.ErrorMessages.Add(ex.Message);
+                return _response;
             }
         }
 
         public async Task<ApiResponse> ResetPasswordAsync(ResetPasswordDTO dto, CancellationToken cancellationToken = default)
         {
-            var response = new ApiResponse();
-
-            //if (!dto.IsValid())
-            //{
-            //    response.IsSuccess = false;
-            //    response.StatusCode = HttpStatusCode.BadRequest;
-            //    response.Result = "Invalid payload";
-            //    return response;
-            //}
-
             var user = await _userRepo.GetByEmailAsync(dto.Email);
             if (user == null)
             {
-                response.IsSuccess = false;
-                response.StatusCode = HttpStatusCode.BadRequest;
-                response.ErrorMessages.Add("User not found.");
-                return response;
+                _response.IsSuccess = false;
+                _response.StatusCode = HttpStatusCode.BadRequest;
+                _response.ErrorMessages.Add("User not found.");
+                return _response;
             }
 
             var decodedToken = System.Text.Encoding.UTF8.GetString(WebEncoders.Base64UrlDecode(dto.Token));
             if (user.PasswordResetToken != decodedToken || user.ResetTokenExpiry == null || user.ResetTokenExpiry < DateTime.UtcNow)
             {
-                response.IsSuccess = false;
-                response.StatusCode = HttpStatusCode.BadRequest;
-                response.ErrorMessages.Add("Invalid or expired reset token.");
-                return response;
+                _response.IsSuccess = false;
+                _response.StatusCode = HttpStatusCode.BadRequest;
+                _response.ErrorMessages.Add("Invalid or expired reset token.");
+                return _response;
             }
 
             var setToken = await _userRepo.SetPasswordResetTokenAsync(user, decodedToken);
             if (!setToken)
             {
-                response.IsSuccess = false;
-                response.StatusCode = HttpStatusCode.InternalServerError;
-                response.ErrorMessages.Add("Failed to set reset token state.");
-                return response;
+                _response.IsSuccess = false;
+                _response.StatusCode = HttpStatusCode.InternalServerError;
+                _response.ErrorMessages.Add("Failed to set reset token state.");
+                return _response;
             }
 
             var updateResult = await _userRepo.UpdatePasswordAsync(user, dto.Password);
             if (!updateResult)
             {
-                response.IsSuccess = false;
-                response.StatusCode = HttpStatusCode.InternalServerError;
-                response.ErrorMessages.Add("Failed to update password");
-                return response;
+                _response.IsSuccess = false;
+                _response.StatusCode = HttpStatusCode.InternalServerError;
+                _response.ErrorMessages.Add("Failed to update password");
+                return _response;
             }
 
-            response.IsSuccess = true;
-            response.StatusCode = HttpStatusCode.OK;
-            return response;
+            _response.IsSuccess = true;
+            _response.StatusCode = HttpStatusCode.OK;
+            return _response;
         }
 
-        public async Task<ApiResponse> RefreshTokenAsync(RefreshTokenDto dto, CancellationToken cancellationToken = default)
+
+        #region Token Section
+
+        private async Task<ApiResponse> IssueTokensAsync(User user, CancellationToken ct)
         {
-            var response = new ApiResponse();
+            var roles = await _db.UserRoles
+                .Where(x => x.UserId == user.Id)
+                .Include(x => x.Role)
+                .Select(x => x.Role.Name)
+                .ToListAsync(ct);
+
+            var accessToken = await _tokenService.GenerateToken(user, roles);
+            var refreshToken = await _tokenService.GenerateRefreshToken();
+
+            var refreshEntity = new RefreshToken
+            {
+                UserId = user.Id,
+                TokenHash = Hash(refreshToken),
+                CreatedAt = DateTime.UtcNow,
+                ExpiresAt = DateTime.UtcNow.AddDays(7)
+            };
+
+            _db.RefreshTokens.Add(refreshEntity);
+            await _db.SaveChangesAsync(ct);
+
+            _response.StatusCode = HttpStatusCode.OK;
+            _response.IsSuccess = true;
+            _response.Result = new
+            {
+                accessToken,
+                refreshToken,
+                expiresAt = DateTime.UtcNow.AddMinutes(15)
+            };
+
+            return _response;
+        }
+
+        public async Task<ApiResponse> RefreshTokenAsync(RefreshTokenDto dto, CancellationToken ct)
+        {
             try
             {
-                if (string.IsNullOrEmpty(dto.RefreshToken))
+                var hash = Hash(dto.RefreshToken);
+
+                var token = await _db.RefreshTokens
+                    .Include(t => t.User)
+                    .ThenInclude(u => u.UserRoles)!
+                    .ThenInclude(r => r.Role)
+                    .FirstOrDefaultAsync(t => t.TokenHash == hash && !t.IsRevoked, ct);
+
+                if (token == null || token.ExpiresAt < DateTime.UtcNow)
                 {
-                    response.StatusCode = HttpStatusCode.BadRequest;
-                    response.IsSuccess = false;
-                    response.ErrorMessages.Add("Refresh token is required");
-                    return response;
+                    _response.StatusCode = HttpStatusCode.Unauthorized;
+                    _response.IsSuccess = false;
+                    _response.ErrorMessages.Add("Invalid refresh token");
+                    return _response;
                 }
 
-                var userIdStr = _tokenService.GetUserIdFromToken(dto.RefreshToken);
-                if (string.IsNullOrEmpty(userIdStr))
-                {
-                    response.StatusCode = HttpStatusCode.BadRequest;
-                    response.IsSuccess = false;
-                    response.ErrorMessages.Add("Invalid refresh token");
-                    return response;
-                }
+                token.IsRevoked = true;
+                var roles = token.User.UserRoles!.Select(r => r.Role.Name).ToList();
+                var newAccess = await _tokenService.GenerateToken(token.User, roles);
+                var newRefresh = _tokenService.GenerateRefreshToken();
 
-                if (!int.TryParse(userIdStr, out var userId))
+                _db.RefreshTokens.Add(new RefreshToken
                 {
-                    response.StatusCode = HttpStatusCode.BadRequest;
-                    response.IsSuccess = false;
-                    response.ErrorMessages.Add("Invalid refresh token payload");
-                    return response;
-                }
+                    UserId = token.UserId,
+                    TokenHash = Hash(newRefresh.ToString()!),
+                    CreatedAt = DateTime.UtcNow,
+                    ExpiresAt = DateTime.UtcNow.AddDays(7)
+                });
 
-                var user = await _db.Users
-                    .Include(u => u.UserRoles)!
-                    .ThenInclude(ur => ur.Role)
-                    .FirstOrDefaultAsync(u => u.Id == userId, cancellationToken);
+                await _db.SaveChangesAsync(ct);
+
+                _response.IsSuccess = true;
+                _response.StatusCode = HttpStatusCode.OK;
+                _response.Result = new
+                {
+                    accessToken = newAccess,
+                    refreshToken = newRefresh
+                };
+                return _response;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "[AuthService.RefreshTokenAsync] Error refreshing token, message: " + ex.Message);
+                _response.StatusCode = HttpStatusCode.InternalServerError;
+                _response.IsSuccess = false;
+                _response.ErrorMessages.Add("Error refresh token, message: " + ex.Message);
+                return _response;
+            }
+        }
+
+        public async Task<ApiResponse> RevokeRefreshTokenAsync(int userId, CancellationToken ct)
+        {
+            try
+            {
+                var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == userId, ct);
 
                 if (user == null)
                 {
-                    response.StatusCode = HttpStatusCode.NotFound;
-                    response.IsSuccess = false;
-                    response.ErrorMessages.Add("User not found");
-                    return response;
+                    _response.StatusCode = HttpStatusCode.BadRequest;
+                    _response.IsSuccess = false;
+                    _response.ErrorMessages.Add("Username or Email already exists");
+                    return _response;
                 }
 
-                if (user.RefreshToken != dto.RefreshToken || user.RefreshTokenExpiry < DateTime.UtcNow)
-                {
-                    response.StatusCode = HttpStatusCode.Unauthorized;
-                    response.IsSuccess = false;
-                    response.ErrorMessages.Add("Invalid or expired refresh token");
-                    return response;
-                }
+                user.RefreshToken = null;
+                user.RefreshTokenExpiry = null;
 
-                var roles = user.UserRoles!.Select(u => u.Role.Name).ToList();
-                var newAccessToken = await _tokenService.GenerateToken(user, roles);
-                var newRefreshToken = await _tokenService.GenerateRefreshToken(user);
+                await _db.SaveChangesAsync(ct);
 
-                user.RefreshToken = newRefreshToken;
-                user.RefreshTokenExpiry = DateTime.UtcNow.AddDays(7);
-                _db.Users.Update(user);
-                await _db.SaveChangesAsync(cancellationToken);
-
-                response.StatusCode = HttpStatusCode.OK;
-                response.IsSuccess = true;
-                response.Result = new
-                {
-                    accessToken = newAccessToken,
-                    refreshToken = newRefreshToken,
-                    expiresAt = DateTime.UtcNow.AddMinutes(15)
-                };
-                return response;
+                _response.IsSuccess = true;
+                _response.StatusCode = HttpStatusCode.OK;
+                return _response;
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "[AuthService.RefreshTokenAsync] Error");
-                response.IsSuccess = false;
-                response.StatusCode = HttpStatusCode.InternalServerError;
-                response.ErrorMessages.Add(ex.Message);
-                return response;
+                _logger.LogError(ex, "[AuthService.RevokeRefreshTokenAsync] Error revoke token, message: " + ex.Message);
+
+                _response.IsSuccess = false;
+                _response.StatusCode = HttpStatusCode.InternalServerError;
+                _response.ErrorMessages.Add("Error revoke token, message: " + ex.Message);
+                return _response;
             }
         }
 
-        public async Task<ApiResponse> StoreRefreshTokenAsync(int userId, string refreshToken, CancellationToken cancellationToken = default)
-        {
-            var response = new ApiResponse();
-            try
-            {
-                var user = await _db.Users.FindAsync(new object[] { userId }, cancellationToken);
-                if (user != null)
-                {
-                    user.RefreshToken = refreshToken;
-                    user.RefreshTokenExpiry = DateTime.UtcNow.AddDays(3);
-                    await _db.SaveChangesAsync(cancellationToken);
+        //private static string HashToken(string token)
+        //{
+        //    using var sha = System.Security.Cryptography.SHA256.Create();
+        //    var bytes = System.Text.Encoding.UTF8.GetBytes(token);
+        //    var hash = sha.ComputeHash(bytes);
+        //    return Convert.ToBase64String(hash);
+        //}
 
-                    response.IsSuccess = true;
-                    response.StatusCode = HttpStatusCode.OK;
-                    response.Result = new
-                    {
-                        user.RefreshToken, user.RefreshTokenExpiry
-                    };
+        //public async Task<ApiResponse> RefreshTokenAsync(RefreshTokenDto dto, CancellationToken cancellationToken = default)
+        //{
+        //    var response = new ApiResponse();
+        //    try
+        //    {
+        //        #region validations
 
-                    return response;
-                }
+        //        if (string.IsNullOrEmpty(dto.RefreshToken))
+        //        {
+        //            _response.StatusCode = HttpStatusCode.BadRequest;
+        //            _response.IsSuccess = false;
+        //            _response.ErrorMessages.Add("Refresh token is required");
+        //            return response;
+        //        }
 
-                response.StatusCode = HttpStatusCode.NotFound;
-                response.IsSuccess = false;
-                response.ErrorMessages.Add("User not found, please get any user that exists.");
-                return response;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "[AuthService.StoreRefreshTokenAsync] Error storing refresh token for {UserId}", userId);
+        //        var userIdStr = _tokenService.GetUserIdFromToken(dto.RefreshToken);
+        //        if (string.IsNullOrEmpty(userIdStr))
+        //        {
+        //            _response.StatusCode = HttpStatusCode.BadRequest;
+        //            _response.IsSuccess = false;
+        //            _response.ErrorMessages.Add("Invalid refresh token");
+        //            return response;
+        //        }
 
-                response.IsSuccess = false;
-                response.StatusCode = HttpStatusCode.InternalServerError;
-                response.ErrorMessages = new List<string>() { ex.Message.ToString() };
-                return response;
-            }
-        }
+        //        if (!int.TryParse(userIdStr, out var userId))
+        //        {
+        //            _response.StatusCode = HttpStatusCode.BadRequest;
+        //            _response.IsSuccess = false;
+        //            _response.ErrorMessages.Add("Invalid refresh token payload");
+        //            return response;
+        //        }
 
-        private string MailBody(string mail, string resetLink)
-        {
-            return $@"
-                <html>
-                    <body>
-                        <p>Hi {mail},</p>
-                        <p>We received a request to reset your password. Click the link below to reset your password:</p>
-                        <p><a href='{resetLink}'>Reset Password</a></p>
-                        <p>If you did not request a password reset, please ignore this email or contact support if you have questions.</p>
-                        <p>Thanks,</p>
-                        <p>The Team</p>
-                    </body>
-                </html>";
-        }
+        //        var user = await _db.Users
+        //            .Include(u => u.UserRoles)!
+        //            .ThenInclude(ur => ur.Role)
+        //            .FirstOrDefaultAsync(u => u.Id == userId, cancellationToken);
 
+        //        if (user == null)
+        //        {
+        //            _response.StatusCode = HttpStatusCode.NotFound;
+        //            _response.IsSuccess = false;
+        //            _response.ErrorMessages.Add("User not found");
+        //            return response;
+        //        }
 
+        //        if (user.RefreshToken != dto.RefreshToken || user.RefreshTokenExpiry < DateTime.UtcNow)
+        //        {
+        //            _response.StatusCode = HttpStatusCode.Unauthorized;
+        //            _response.IsSuccess = false;
+        //            _response.ErrorMessages.Add("Invalid or expired refresh token");
+        //            return response;
+        //        }
 
+        //        #endregion
+
+        //        var roles = user.UserRoles!.Select(u => u.Role.Name).ToList();
+        //        var newAccessToken = await _tokenService.GenerateToken(user, roles);
+        //        var newRefreshToken = await _tokenService.GenerateRefreshToken(user);
+
+        //        //user.RefreshToken = newRefreshToken;
+        //        user.RefreshToken = HashToken(newRefreshToken); // store hashed new refresh token
+        //        user.RefreshTokenExpiry = DateTime.UtcNow.AddDays(7);
+        //        _db.Users.Update(user);
+        //        await _db.SaveChangesAsync(cancellationToken);
+
+        //        _response.StatusCode = HttpStatusCode.OK;
+        //        _response.IsSuccess = true;
+        //        _response.Result = new
+        //        {
+        //            accessToken = newAccessToken,
+        //            refreshToken = newRefreshToken,
+        //            expiresAt = DateTime.UtcNow.AddMinutes(15)
+        //        };
+        //        return response;
+        //    }
+        //    catch (Exception ex)
+        //    {
+        //        _logger.LogError(ex, "[AuthService.RefreshTokenAsync] Error");
+        //        _response.IsSuccess = false;
+        //        _response.StatusCode = HttpStatusCode.InternalServerError;
+        //        _response.ErrorMessages.Add(ex.Message);
+        //        return response;
+        //    }
+        //}
+
+        //public async Task<ApiResponse> StoreRefreshTokenAsync(int userId, string refreshToken, CancellationToken cancellationToken = default)
+        //{
+        //    var response = new ApiResponse();
+        //    try
+        //    {
+        //        var user = await _db.Users.FindAsync(new object[] { userId }, cancellationToken);
+        //        if (user != null)
+        //        {
+        //            //user.RefreshToken = refreshToken;
+        //            user.RefreshToken = HashToken(refreshToken); // store hashed token
+        //            user.RefreshTokenExpiry = DateTime.UtcNow.AddDays(3);
+        //            await _db.SaveChangesAsync(cancellationToken);
+
+        //            _response.IsSuccess = true;
+        //            _response.StatusCode = HttpStatusCode.OK;
+        //            _response.Result = new
+        //            {
+        //                user.RefreshToken, user.RefreshTokenExpiry
+        //            };
+
+        //            return response;
+        //        }
+
+        //        _response.StatusCode = HttpStatusCode.NotFound;
+        //        _response.IsSuccess = false;
+        //        _response.ErrorMessages.Add("User not found, please get any user that exists.");
+        //        return response;
+        //    }
+        //    catch (Exception ex)
+        //    {
+        //        _logger.LogError(ex, "[AuthService.StoreRefreshTokenAsync] Error storing refresh token for {UserId}", userId);
+
+        //        _response.IsSuccess = false;
+        //        _response.StatusCode = HttpStatusCode.InternalServerError;
+        //        _response.ErrorMessages = new List<string>() { ex.Message.ToString() };
+        //        return response;
+        //    }
+        //}
+
+        #endregion
+
+        #region JWT Token functions
         public async Task<UserInfoDto?> GetCurrentUserFromJwt(string? jwtToken)
         {
             try
@@ -479,6 +559,28 @@ namespace AtomicHabits.Services
             return header.Substring("Bearer ".Length).Trim();
         }
 
+        #endregion
+
+        private string MailBody(string mail, string resetLink)
+        {
+            return $@"
+                <html>
+                    <body>
+                        <p>Hi {mail},</p>
+                        <p>We received a request to reset your password. Click the link below to reset your password:</p>
+                        <p><a href='{resetLink}'>Reset Password</a></p>
+                        <p>If you did not request a password reset, please ignore this email or contact support if you have questions.</p>
+                        <p>Thanks,</p>
+                        <p>The Team</p>
+                    </body>
+                </html>";
+        }
+
+        private static string Hash(string input)
+        {
+            using var sha = SHA256.Create();
+            return Convert.ToBase64String(sha.ComputeHash(Encoding.UTF8.GetBytes(input)));
+        }
 
     }
 }

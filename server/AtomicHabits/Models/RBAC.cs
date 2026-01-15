@@ -8,7 +8,6 @@ namespace AtomicHabits.Models
         public string? Username { get; set; }
         public string? Email { get; set; }
         public string? PasswordHash { get; set; }
-        public string? FullName { get; set; }
         public string? AvatarUrl { get; set; }
         public bool IsActive { get; set; }
         public bool TwoFactorEnabled { get; set; }
@@ -17,11 +16,13 @@ namespace AtomicHabits.Models
         public DateTime? ResetTokenExpiry { get; set; }
         public string? RefreshToken { get; set; }
         public DateTime? RefreshTokenExpiry { get; set; }
+        public bool IsRevoked { get; set; }
 
         public ICollection<UserRole>? UserRoles { get; set; }
         public ICollection<Habit>? Habits { get; set; }
         public ICollection<HabitTracking>? HabitTrackings { get; set; }
         public ICollection<Streak>? Streaks { get; set; }
+        public ICollection<RefreshToken> RefreshTokens { get; set; } = new List<RefreshToken>();
     }
 
 
