@@ -9,10 +9,10 @@ const TopCards = () => {
   const { user } = useAuth();
 
   useEffect(() => {
-    if (!user?.userId) return;
+    if (!user?.sub) return;
 
-    getHabitOverview(user?.userId);
-  }, [getHabitOverview, user?.userId]);
+    getHabitOverview(user?.sub);
+  }, [getHabitOverview, user?.sub]);
 
   const overview = habitOverview?.result;
   

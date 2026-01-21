@@ -14,43 +14,26 @@ export const isTokenExpired = (token) => {
 
 // Store tokens in cookies with proper expiration
 export const storeTokens = (accessToken, refreshToken) => {
-  if (accessToken) {
+  const store = (name, token, fallbackMaxAge) => {
     try {
-      const decoded = jwtDecode(accessToken);
-      const expiresIn = Math.floor(decoded.exp - Date.now() / 1000);
-      setCookie("accessToken", accessToken, {
-        path: "/",
-        secure: true,
-        sameSite: "strict",
-        maxAge: expiresIn,
+      const { exp } = jwtDecode(token);
+      setCookie(name, token, {
+        maxAge: Math.floor(exp - Date.now() / 1000),
       });
     } catch {
-      setCookie("accessToken", accessToken, { maxAge: 900 }); // 15 min fallback
+      setCookie(name, token, { maxAge: fallbackMaxAge });
     }
-  }
+  };
 
-  if (refreshToken) {
-    try {
-      const decoded = jwtDecode(refreshToken);
-      const expiresIn = Math.floor(decoded.exp - Date.now() / 1000);
-      setCookie("refreshToken", refreshToken, {
-        path: "/",
-        secure: true,
-        sameSite: "strict",
-        maxAge: expiresIn,
-      });
-    } catch {
-      setCookie("refreshToken", refreshToken, { maxAge: 604800 }); // 7 days fallback
-    }
-  }
+  if (accessToken) store("accessToken", accessToken, 900);
+  if (refreshToken) store("refreshToken", refreshToken, 604800);
 };
 
 // Build user profile from accessToken
 export const buildUserProfile = (accessToken) => {
   try {
     const decoded = jwtDecode(accessToken);
-    const { ...claims } = decoded;
-    return claims;
+    return decoded || null;
   } catch {
     return null;
   }
@@ -63,18 +46,17 @@ export const refreshAccessToken = async () => {
     if (!refreshToken) return null;
 
     const res = await api.post("/Auth/refresh-token", { refreshToken });
-    const newAccessToken = res.data?.accessToken;
-    const newRefreshToken = res.data.refreshToken || refreshToken;
 
-    if (!newAccessToken) return null;
+    const { accessToken, refreshToken: newRefreshToken } = res.data || {};
+    if (!accessToken) return null;
 
-    storeTokens(newAccessToken, newRefreshToken);
-    return newAccessToken;
+    storeTokens(accessToken, newRefreshToken || refreshToken);
+    return accessToken;
   } catch (err) {
     console.error("Failed to refresh token:", err);
+
     deleteCookie("accessToken");
     deleteCookie("refreshToken");
-
     return null;
   }
 };

@@ -49,7 +49,7 @@ namespace AtomicHabits.Service
                     _issuer,
                     _audience,
                     claims,
-                    expires: DateTime.UtcNow.AddMinutes(10),
+                    expires: DateTime.UtcNow.AddHours(1),
                     signingCredentials: new SigningCredentials(_signingKey, SecurityAlgorithms.HmacSha256)
                 );
 

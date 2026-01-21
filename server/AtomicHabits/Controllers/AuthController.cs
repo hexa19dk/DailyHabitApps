@@ -23,15 +23,15 @@ namespace AtomicHabits.Controllers
         [AllowAnonymous]
         public async Task<IActionResult> Register(RegisterDto dto, CancellationToken cancellationToken)
         {
-            var res = await _authService.RegisterAsync(dto, cancellationToken);
+            var res = await _authService.RegisterAsync(dto);
             return StatusCode((int)res.StatusCode, res);
         }
 
         [HttpPost("login")]
         [AllowAnonymous]
-        public async Task<IActionResult> Login(LoginDto dto, CancellationToken cancellationToken)
+        public async Task<IActionResult> Login(LoginDto dto)
         {
-            var res = await _authService.LoginAsync(dto, cancellationToken);
+            var res = await _authService.LoginAsync(dto);
             return StatusCode((int)res.StatusCode, res);
         }
 
@@ -52,7 +52,7 @@ namespace AtomicHabits.Controllers
         }
 
         [HttpPost("refresh-token")]
-        //[AllowAnonymous]
+        [AllowAnonymous]
         public async Task<IActionResult> RefreshToken([FromBody] RefreshTokenDto dto, CancellationToken cancellationToken)
         {
             var res = await _authService.RefreshTokenAsync(dto, cancellationToken);

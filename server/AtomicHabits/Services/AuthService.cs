@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.Identity.UI.Services;
 using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.EntityFrameworkCore;
 using System.Net;
+using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Encodings.Web;
@@ -16,13 +17,13 @@ namespace AtomicHabits.Services
 {
     public interface IAuthService
     {
-        Task<ApiResponse> RegisterAsync(RegisterDto dto, CancellationToken cancellationToken = default);
-        Task<ApiResponse> LoginAsync(LoginDto dto, CancellationToken cancellationToken = default);
-        Task<ApiResponse> ForgotPasswordAsync(ForgotPasswordDTO dto, CancellationToken cancellationToken = default);
-        Task<ApiResponse> ResetPasswordAsync(ResetPasswordDTO dto, CancellationToken cancellationToken = default);
+        Task<ApiResponse> RegisterAsync(RegisterDto dto);
+        Task<ApiResponse> LoginAsync(LoginDto dto);
+        Task<ApiResponse> ForgotPasswordAsync(ForgotPasswordDTO dto, CancellationToken cancellationToken);
+        Task<ApiResponse> ResetPasswordAsync(ResetPasswordDTO dto, CancellationToken cancellationToken);
         Task<ApiResponse> RefreshTokenAsync(RefreshTokenDto dto, CancellationToken ct);
         //Task<ApiResponse> StoreRefreshTokenAsync(int userId, string refreshToken, CancellationToken cancellationToken = default);
-        Task<string?> GeneratePasswordResetTokenAsync(string email, CancellationToken cancellationToken = default);
+        Task<string?> GeneratePasswordResetTokenAsync(string email, CancellationToken cancellationToken);
 
         Task<UserInfoDto?> GetCurrentUserFromJwt(string? jwtToken);
         Task<string?> GetUserIdFromJwt(string? jwtToken);
@@ -53,12 +54,14 @@ namespace AtomicHabits.Services
             _hasher = hasher;
         }
 
-        public async Task<ApiResponse> RegisterAsync(RegisterDto dto, CancellationToken ct)
+        #region Main Feature 
+
+        public async Task<ApiResponse> RegisterAsync(RegisterDto dto)
         {
-            using var trx = await _db.Database.BeginTransactionAsync(ct);
+            using var trx = await _db.Database.BeginTransactionAsync();
             try
             {
-                if (await _db.Users.AnyAsync(x => x.Username == dto.Username || x.Email == dto.Email, ct))
+                if (await _db.Users.AnyAsync(x => x.Username == dto.Username || x.Email == dto.Email))
                 {
                     _response.StatusCode = HttpStatusCode.BadRequest;
                     _response.IsSuccess = false;
@@ -70,28 +73,28 @@ namespace AtomicHabits.Services
                 {
                     Username = dto.Username,
                     Email = dto.Email,
-                    PasswordHash = _hasher.HashPassword(null!, dto.Password),
+                    PasswordHash = BCrypt.Net.BCrypt.HashPassword(dto.Password),
                     CreatedAt = DateTime.UtcNow,
                     IsActive = true
                 };
 
-                await _db.Users.AddAsync(user, ct);
-                await _db.SaveChangesAsync(ct);
+                await _db.Users.AddAsync(user);
+                await _db.SaveChangesAsync();
 
                 // assign role if exists
-                var role = await _db.Roles.FirstOrDefaultAsync(r => r.Name == dto.Role, ct);
+                var role = await _db.Roles.FirstOrDefaultAsync(r => r.Name == dto.Role);
                 if (role != null)
                 {
-                    await _db.UserRoles.AddAsync(new UserRole { UserId = user.Id, RoleId = role.Id }, ct);
-                    await _db.SaveChangesAsync(ct);
+                    await _db.UserRoles.AddAsync(new UserRole { UserId = user.Id, RoleId = role.Id });
+                    await _db.SaveChangesAsync();
                 }
 
-                return await IssueTokensAsync(user, ct);
+                return await IssueTokensAsync(user);
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "[AuthService.RegisterAsync] Error for {Username}", dto?.Username);
-                await trx.RollbackAsync(ct);
+                await trx.RollbackAsync();
                 _response.IsSuccess = false;
                 _response.StatusCode = HttpStatusCode.InternalServerError;
                 _response.ErrorMessages.Add(ex.Message);
@@ -99,31 +102,34 @@ namespace AtomicHabits.Services
             }
         }
 
-        public async Task<ApiResponse> LoginAsync(LoginDto dto, CancellationToken ct)
+        public async Task<ApiResponse> LoginAsync(LoginDto dto)
         {
             var response = new ApiResponse();
             try
             {
-                var user = await _db.Users
-                    .Include(u => u.UserRoles)!
-                    .ThenInclude(ur => ur.Role)
-                    .FirstOrDefaultAsync(u => u.Username == dto.Username || u.Email == dto.Username, ct);
-
-                var verify = _hasher.VerifyHashedPassword(user!, user?.PasswordHash!, dto.Password);
-
-                if (user == null || verify == PasswordVerificationResult.Failed)
+                if (dto == null || string.IsNullOrWhiteSpace(dto.Email) || string.IsNullOrWhiteSpace(dto.Password))
                 {
-                    _response.StatusCode = HttpStatusCode.Unauthorized;
-                    _response.IsSuccess = false;
-                    _response.ErrorMessages.Add("Invalid Credentials");
+                    response.StatusCode = HttpStatusCode.BadRequest;
+                    response.IsSuccess = false;
+                    response.ErrorMessages.Add("Username and password are required.");
                     return response;
                 }
 
-                return await IssueTokensAsync(user, ct);
+                var identifier = dto.Email.Trim();
+                var user = await _userRepo.GetByEmailAsync(identifier);
+                if (user == null || string.IsNullOrWhiteSpace(user.PasswordHash) || !BCrypt.Net.BCrypt.Verify(dto.Password, user.PasswordHash))
+                {
+                    response.StatusCode = HttpStatusCode.Unauthorized;
+                    response.IsSuccess = false;
+                    response.ErrorMessages.Add("Invalid credentials.");
+                    return response;
+                }
+
+                return await IssueTokensAsync(user);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "[AuthService.LoginAsync] Error login attempt for {Username}", dto?.Username);
+                _logger.LogError(ex, "[AuthService.LoginAsync] Error login attempt for {Username}", dto?.Email);
                 _response.IsSuccess = false;
                 _response.StatusCode = HttpStatusCode.InternalServerError;
                 _response.ErrorMessages.Add(ex.Message);
@@ -218,16 +224,18 @@ namespace AtomicHabits.Services
             return _response;
         }
 
+        #endregion
+
 
         #region Token Section
 
-        private async Task<ApiResponse> IssueTokensAsync(User user, CancellationToken ct)
+        private async Task<ApiResponse> IssueTokensAsync(User user)
         {
             var roles = await _db.UserRoles
                 .Where(x => x.UserId == user.Id)
                 .Include(x => x.Role)
                 .Select(x => x.Role.Name)
-                .ToListAsync(ct);
+                .ToListAsync();
 
             var accessToken = await _tokenService.GenerateToken(user, roles);
             var refreshToken = await _tokenService.GenerateRefreshToken();
@@ -241,7 +249,7 @@ namespace AtomicHabits.Services
             };
 
             _db.RefreshTokens.Add(refreshEntity);
-            await _db.SaveChangesAsync(ct);
+            await _db.SaveChangesAsync();
 
             _response.StatusCode = HttpStatusCode.OK;
             _response.IsSuccess = true;
@@ -249,7 +257,7 @@ namespace AtomicHabits.Services
             {
                 accessToken,
                 refreshToken,
-                expiresAt = DateTime.UtcNow.AddMinutes(15)
+                expiresAt = DateTime.UtcNow.AddDays(1)
             };
 
             return _response;
@@ -265,7 +273,7 @@ namespace AtomicHabits.Services
                     .Include(t => t.User)
                     .ThenInclude(u => u.UserRoles)!
                     .ThenInclude(r => r.Role)
-                    .FirstOrDefaultAsync(t => t.TokenHash == hash && !t.IsRevoked, ct);
+                    .FirstOrDefaultAsync(t => t.TokenHash == hash && !t.IsRevoked);
 
                 if (token == null || token.ExpiresAt < DateTime.UtcNow)
                 {
@@ -285,10 +293,10 @@ namespace AtomicHabits.Services
                     UserId = token.UserId,
                     TokenHash = Hash(newRefresh.ToString()!),
                     CreatedAt = DateTime.UtcNow,
-                    ExpiresAt = DateTime.UtcNow.AddDays(7)
+                    ExpiresAt = DateTime.UtcNow.AddDays(1)
                 });
 
-                await _db.SaveChangesAsync(ct);
+                await _db.SaveChangesAsync();
 
                 _response.IsSuccess = true;
                 _response.StatusCode = HttpStatusCode.OK;
@@ -313,7 +321,7 @@ namespace AtomicHabits.Services
         {
             try
             {
-                var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == userId, ct);
+                var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == userId);
 
                 if (user == null)
                 {
@@ -326,7 +334,7 @@ namespace AtomicHabits.Services
                 user.RefreshToken = null;
                 user.RefreshTokenExpiry = null;
 
-                await _db.SaveChangesAsync(ct);
+                await _db.SaveChangesAsync();
 
                 _response.IsSuccess = true;
                 _response.StatusCode = HttpStatusCode.OK;
@@ -483,12 +491,14 @@ namespace AtomicHabits.Services
             try
             {
                 if (string.IsNullOrWhiteSpace(jwtToken)) return null;
+
                 var claims = _tokenService.GetClaimsFromToken(jwtToken);
                 if (claims == null || claims.Count == 0) return null;
 
-                var userId = claims.ContainsKey("userId") ? claims["userId"] : null;
-                var email = claims.ContainsKey("email") ? claims["email"] : null;
-                var username = claims.ContainsKey("username") ? claims["username"] : null;
+                var userId = claims.TryGetValue(ClaimTypes.NameIdentifier, out var id) ? id : null;
+                if (string.IsNullOrWhiteSpace(userId)) return null;
+                var email = claims.TryGetValue(ClaimTypes.Email, out var e) ? e : string.Empty;
+                var username = claims.TryGetValue("username", out var u) ? u : string.Empty;
 
                 if (string.IsNullOrWhiteSpace(userId)) return null;
 

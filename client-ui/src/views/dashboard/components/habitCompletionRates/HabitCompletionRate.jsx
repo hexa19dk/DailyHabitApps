@@ -45,7 +45,7 @@ const HabitCompletionRate = () => {
 
     // Fetch Habit Distribution Stats
     useEffect(() => {
-        if (!habitId || !user?.userId) return;
+        if (!habitId || !user?.sub) return;
 
         const fetchDistributedStats = async () => {
             let response;
@@ -54,20 +54,20 @@ const HabitCompletionRate = () => {
                 if (range === 'weekly') {
                     response = await getWeeklyDistribution({
                         HabitId: habitId,
-                        UserId: user.userId,
+                        UserId: user.sub,
                         Year: currYear,
                         Month: currMonth,
                     });
                 } else if (range === 'monthly') {
                     response = await getMonthlyDistribution({
                         HabitId: habitId,
-                        UserId: user.userId,
+                        UserId: user.sub,
                         Year: currYear,
                     });
                 } else if (range === 'yearly') {
                     response = await getYearlyDistribution({
                         HabitId: habitId,
-                        UserId: user.userId,
+                        UserId: user.sub,
                         StartYear: currYear - 4,
                         EndYear: currYear,
                     });
@@ -88,7 +88,7 @@ const HabitCompletionRate = () => {
 
         fetchDistributedStats();
 
-    }, [habitId, range, user?.userId]);
+    }, [habitId, range, user?.sub]);
 
 
     /* ---------------------------

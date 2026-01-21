@@ -24,7 +24,9 @@ export const HabitProvider = ({ children }) => {
 
       var resToken = buildUserProfile(accessToken);
 
-      const res = await api.get(`/Habit/get-habits/${resToken.userId}`);
+      // console.log('Fetching habits for user:', resToken.sub);
+
+      const res = await api.get(`/Habit/get-habits/${resToken.sub}`);
       setHabits(res.data || []);
     } catch (err) {
       console.error('Failed to fetch habits:', err.message);

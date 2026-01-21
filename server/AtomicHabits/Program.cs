@@ -1,9 +1,11 @@
 using AtomicHabits.Data;
+using AtomicHabits.Models;
 using AtomicHabits.Repositories;
 using AtomicHabits.Service;
 using AtomicHabits.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Identity.UI.Services;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -43,6 +45,8 @@ builder.Services.AddScoped<IHabitService, HabitService>();
 builder.Services.AddScoped<IDashboardService, DashboardService>();
 
 #endregion
+
+builder.Services.AddScoped<IPasswordHasher<User>, PasswordHasher<User>>();
 
 #endregion
 

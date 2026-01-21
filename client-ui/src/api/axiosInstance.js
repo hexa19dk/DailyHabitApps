@@ -2,7 +2,14 @@ import axios from "axios";
 import { getCookie } from "../utils/cookieUtils";
 import { isTokenExpired, refreshAccessToken } from "../utils/tokenUtils";
 
-const baseURL = import.meta.env.VITE_API_URL || '/api';
+const baseURL = import.meta.env.VITE_API_URL || "/api";
+
+const ANONYMOUS_ENDPOINTS = [
+  "/Auth/login",
+  "/Auth/register",
+  "/Auth/forgot-password",
+  "/Auth/refresh-token",
+];
 
 const axiosInstance = axios.create({
   baseURL: baseURL,
@@ -14,18 +21,12 @@ const axiosInstance = axios.create({
   timeout: 10000,
 });
 
-console.log("Axios baseURL:", baseURL);
-
 // Refresh token logic
 let isRefreshing = false;
 let failedQueue = [];
 
 const processQueue = (error, token = null) => {
-  failedQueue.forEach((prom) => {
-    if (error) prom.reject(error);
-    else prom.resolve(token);
-  });
-
+  failedQueue.forEach((p) => (error ? p.reject(error) : p.resolve(token)));
   failedQueue = [];
 };
 
@@ -33,16 +34,17 @@ const processQueue = (error, token = null) => {
 axiosInstance.interceptors.request.use(
   (config) => {
     try {
-      // Do not add Authorization for login or register endpoints
-      const isAnonymousEndpoint = config.url?.includes('/Auth/login') || config.url?.includes('/Auth/register') || config.url?.includes('/Auth/forgot-password');
+      const isAnonymous = ANONYMOUS_ENDPOINTS.some((endpoint) =>
+        config.url?.includes(endpoint),
+      );
 
-      if (!isAnonymousEndpoint) {
+      if (!isAnonymous) {
         const token = getCookie("accessToken");
         if (token && !isTokenExpired(token)) {
-          config.headers = config.headers || {};
           config.headers.Authorization = `Bearer ${token}`;
         }
       }
+
       return config;
     } catch (e) {
       console.error("Failed to access from cookies:", e.message);
@@ -50,7 +52,7 @@ axiosInstance.interceptors.request.use(
 
     return config;
   },
-  (error) => Promise.reject(error)
+  (error) => Promise.reject(error),
 );
 
 axiosInstance.interceptors.response.use(
@@ -62,12 +64,10 @@ axiosInstance.interceptors.response.use(
       if (isRefreshing) {
         return new Promise((resolve, reject) => {
           failedQueue.push({ resolve, reject });
-        })
-          .then((token) => {
-            originalRequest.headers["Authorization"] = `Bearer ${token}`;
-            return axiosInstance(originalRequest);
-          })
-          .catch((err) => Promise.reject(err));
+        }).then((token) => {
+          originalRequest.headers.Authorization = `Bearer ${token}`;
+          return axiosInstance(originalRequest);
+        });
       }
 
       originalRequest._retry = true;
@@ -79,14 +79,14 @@ axiosInstance.interceptors.response.use(
         originalRequest.headers["Authorization"] = `Bearer ${newToken}`;
         isRefreshing = false;
         return axiosInstance(originalRequest);
-      } else {
-        processQueue(new Error("Refresh token failed"), null);
-        isRefreshing = false;
       }
+
+      processQueue(new Error("Refresh token failed"), null);
+      isRefreshing = false;
     }
 
     return Promise.reject(error);
-  }
+  },
 );
 
 export default axiosInstance;

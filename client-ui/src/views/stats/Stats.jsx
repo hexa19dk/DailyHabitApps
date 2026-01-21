@@ -84,8 +84,8 @@ const Stats = () => {
   const { user } = useAuth();
 
   useEffect(() => {
-    fetchHabits(user.userId);
-  }, [fetchHabits, user.userId]);
+    fetchHabits(user.sub);
+  }, [fetchHabits, user.sub]);
 
   const handleHabitClick = async (habitId) => {
     setSelectedCardHabit(habitId);
@@ -95,7 +95,7 @@ const Stats = () => {
     const requestHabitId = habitId;
 
     try {
-      const trackingRes = await getHabitTrackingDates(habitId, user.userId);
+      const trackingRes = await getHabitTrackingDates(habitId, user.sub);
 
       if (requestHabitId !== habitId) return;
 

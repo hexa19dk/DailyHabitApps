@@ -35,9 +35,9 @@ const Habit = () => {
 
 
     useEffect(() => {
-        if (!user?.userId) return;
-        fetchHabits(user.userId);
-    }, [fetchHabits, user?.userId]);
+        if (!user?.sub) return;
+        fetchHabits(user.sub);
+    }, [fetchHabits, user?.sub]);
 
     useEffect(() => {
         if (!habits?.result || habits.result.length === 0) return;
@@ -46,7 +46,7 @@ const Habit = () => {
             const statsMap = {};
             for (const habit of habits.result) {
                 try {
-                    const res = await getHabitStats(habit.id, user.userId);
+                    const res = await getHabitStats(habit.id, user.sub);
                     if (res?.result) {
                         statsMap[habit.id] = res.result;
                     }
@@ -58,7 +58,7 @@ const Habit = () => {
         };
 
         fetchAllStats();
-    }, [habits?.result, getHabitStats, user?.userId]);
+    }, [habits?.result, getHabitStats, user?.sub]);
 
     const habitSummaryStats = {
         todaySummary: { habitsToday: 5, completedToday: 2, todayCompletionRate: 40 },
@@ -66,6 +66,7 @@ const Habit = () => {
         monthlySummary: { monthlyCompletionRate: 70, totalMonthlySessions: 35 },
         habitHealthScore: 82
     };
+
 
     const handleOpenTrackingDialog = (habitId) => {
         setSelectedCardHabit(habitId);
@@ -105,7 +106,7 @@ const Habit = () => {
                     showError('Failed to create habit.');
                 }
             }
-            fetchHabits(user.userId);
+            fetchHabits(user.sub);
             setOpen(false);
             setEditMode(false);
             setSelectedCardHabit(null);
@@ -119,7 +120,7 @@ const Habit = () => {
         try {
             const trackingPayload = {
                 ...formData,
-                userId: user.userId,
+                userId: user.sub,
             }
             const response = await submitHabitTracking(trackingPayload);
             console.log('Habit tracking response:', response);

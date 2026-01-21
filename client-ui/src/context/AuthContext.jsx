@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import api from '../api/axiosInstance';
 import { getCookie, deleteCookie } from "../utils/cookieUtils";
 import { isTokenExpired, refreshAccessToken, storeTokens, buildUserProfile } from "../utils/tokenUtils";
@@ -15,34 +15,39 @@ export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [initializing, setInitializing] = useState(true);
 
-  useEffect(() => {
-    const loadUser = async () => {
-      const accessToken = getCookie("accessToken");
-      const refreshToken = getCookie("refreshToken");
-
-      if (accessToken) {
-        if (!isTokenExpired(accessToken)) {
-          setUser(buildUserProfile(accessToken));
-        } else if (refreshToken) {
-          const newToken = await refreshAccessToken();
-          if (!newToken) 
-            setUser(null);
-        } else {
-          setUser(null);
-        }
-      } else {
-        setUser(null);
-      }
-
-      setInitializing(false);
-    };
-
-    loadUser();
+  const clearSessions = useCallback(() => {
+    deleteCookie('accessToken');
+    deleteCookie('refreshToken');
+    setUser(null);
   }, []);
 
-  const login = React.useCallback(async (username, password) => {
+  const restoreSession = useCallback(async () => {
+    const accessToken = getCookie("accessToken");
+    const refreshToken = getCookie("refreshToken");
+
+    if (accessToken && !isTokenExpired(accessToken)) {
+      setUser(prev => prev ?? buildUserProfile(accessToken));
+      return;
+    }
+
+    if (refreshToken) {
+      const newAccessToken = await refreshAccessToken();
+      if (newAccessToken) {
+        setUser(prev => prev ?? buildUserProfile(newAccessToken));
+        return;
+      }
+    }
+
+    clearSessions();
+  }, [clearSessions]);
+
+  useEffect(() => {
+    restoreSession().finally(() => setInitializing(false));
+  }, [restoreSession]);
+
+  const login = React.useCallback(async (email, password) => {
     try {
-      const res = await api.post('/Auth/login', { username, password });
+      const res = await api.post('/Auth/login', { email, password });
       const accessToken = res.data.result.accessToken;
       const refreshToken = res.data.result.refreshToken;
 
@@ -81,12 +86,20 @@ export const AuthProvider = ({ children }) => {
   };
 
   const logout = () => {
-    deleteCookie('accessToken');
-    deleteCookie('refreshToken');
-    setUser(null);
+    clearSessions();
   };
 
-  const value = useMemo(() => ({ user, initializing, login, register, requestPasswordReset, logout }), [user, initializing, login]);
+  const value = useMemo(
+    () => ({
+      user,
+      initializing,
+      login,
+      register,
+      requestPasswordReset,
+      logout
+    }),
+    [user, initializing, login]
+  );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };
